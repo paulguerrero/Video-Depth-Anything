@@ -43,6 +43,7 @@ class VideoDepthAnything(nn.Module):
         num_frames=32,
         pe='ape',
         metric=False,
+        ckpt=None,
     ):
         super(VideoDepthAnything, self).__init__()
 
@@ -57,6 +58,8 @@ class VideoDepthAnything(nn.Module):
 
         self.head = DPTHeadTemporal(self.pretrained.embed_dim, features, use_bn, out_channels=out_channels, use_clstoken=use_clstoken, num_frames=num_frames, pe=pe)
         self.metric = metric
+        if ckpt is not None:
+            self.load_state_dict(torch.load(ckpt, map_location="cpu"), strict=True)
 
     def forward(self, x):
         B, T, C, H, W = x.shape
