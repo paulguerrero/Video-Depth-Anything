@@ -1,5 +1,5 @@
 import torch
-from loss import VideoDepthLoss
+from .loss import VideoDepthLoss
 
 B = 2
 T = 32

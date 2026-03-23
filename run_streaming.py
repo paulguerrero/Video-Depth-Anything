@@ -19,7 +19,7 @@ import time
 import cv2
 
 from video_depth_anything.video_depth_stream import VideoDepthAnything
-from utils.dc_utils import save_video
+from video_depth_anything.utils.dc_utils import save_video
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything')

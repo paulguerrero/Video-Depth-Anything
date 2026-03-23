@@ -54,7 +54,7 @@ Repository = "https://github.com/DepthAnything/Video-Depth-Anything"
 Paper = "https://arxiv.org/abs/2501.12375"
 
 [tool.setuptools.packages.find]
-include = ["video_depth_anything*", "utils*", "loss*"]
+include = ["video_depth_anything*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml", "*.yml"]

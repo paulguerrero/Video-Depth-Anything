@@ -17,7 +17,7 @@ import os
 import torch
 
 from video_depth_anything.video_depth import VideoDepthAnything
-from utils.dc_utils import read_video_frames, save_video
+from video_depth_anything.utils.dc_utils import read_video_frames, save_video
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video Depth Anything')
