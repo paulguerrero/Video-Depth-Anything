@@ -33,6 +33,7 @@ dependencies = [
     "easydict",
     "tqdm",
     "OpenEXR==3.3.1",
+    "einops"
 ]
 
 [project.optional-dependencies]

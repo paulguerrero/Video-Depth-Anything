@@ -19,6 +19,7 @@ import cv2
 from tqdm import tqdm
 import numpy as np
 import gc
+from einops import rearrange
 
 from .dinov2 import DINOv2
 from .dpt_temporal import DPTHeadTemporal
@@ -164,3 +165,146 @@ class VideoDepthAnything(nn.Module):
 
         return np.stack(depth_list[:org_video_len], axis=0), target_fps
 
+    @staticmethod
+    def compute_scale_and_shift_torch(prediction, target, mask, scale_only=False):
+        # Ensure scale_only is a boolean scalar, not a tensor
+        scale_only = bool(scale_only)
+
+        if scale_only:
+            # For scale only computation
+            a_00 = torch.sum(mask * prediction * prediction, dim=1)
+            b_0 = torch.sum(mask * prediction * target, dim=1)
+            scale = b_0 / (a_00 + 1e-6)
+            return scale, torch.zeros_like(scale)
+        else:
+            # For both scale and shift computation
+            a_00 = torch.sum(mask * prediction * prediction, dim=1)
+            a_01 = torch.sum(mask * prediction, dim=1)
+            a_11 = torch.sum(mask, dim=1)
+
+            b_0 = torch.sum(mask * prediction * target, dim=1)
+            b_1 = torch.sum(mask * target, dim=1)
+
+            det = a_00 * a_11 - a_01 * a_01
+
+            scale = torch.ones_like(det)
+            shift = torch.zeros_like(det)
+
+            valid_det = det != 0
+            scale[valid_det] = (a_11[valid_det] * b_0[valid_det] - a_01[valid_det] * b_1[valid_det]) / det[valid_det]
+            shift[valid_det] = (-a_01[valid_det] * b_0[valid_det] + a_00[valid_det] * b_1[valid_det]) / det[valid_det]
+
+            return scale, shift
+
+    def get_interpolate_frames_torch(self, frame_list_pre, frame_list_post):
+        n = len(frame_list_pre)
+        device = frame_list_pre[0].device
+        weights = torch.linspace(0, 1, n, device=device)
+        return [(1 - w) * pre + w * post for pre, post, w in zip(frame_list_pre, frame_list_post, weights)]
+
+    def infer_multi_videos_depth_tensor(self, frames, target_fps, input_size=518, device="cuda"):
+        # frames should be of shape [B, F, C, H, W]
+        frame_height, frame_width = frames.shape[-2], frames.shape[-1]
+        batch_size, num_frames = frames.shape[0], frames.shape[1]
+        ratio = max(frame_height, frame_width) / min(frame_height, frame_width)
+        if ratio > 1.78:  # we recommend to process video with ratio smaller than 16:9 due to memory limitation
+            input_size = int(input_size * 1.777 / ratio)
+            input_size = round(input_size / 14) * 14
+
+        # Calculate new dimensions while preserving aspect ratio
+        scale_height = input_size / frame_height
+        scale_width = input_size / frame_width
+
+        if scale_width > scale_height:
+            new_height = int(frame_height * scale_width)
+            new_width = input_size
+        else:
+            new_height = input_size
+            new_width = int(frame_width * scale_height)
+
+        # Ensure dimensions are multiples of 14
+        new_height = (new_height // 14) * 14
+        new_width = (new_width // 14) * 14
+
+        frames = rearrange(frames, "b f c h w -> (b f) c h w") / 255.0
+        frames = F.interpolate(frames, size=(new_height, new_width), mode="bicubic", align_corners=True)
+        frames = (
+            frames - torch.tensor([0.485, 0.456, 0.406], dtype=frames.dtype, device=frames.device).view(1, 3, 1, 1)
+        ) / torch.tensor([0.229, 0.224, 0.225], dtype=frames.dtype, device=frames.device).view(1, 3, 1, 1)
+        frames = rearrange(frames, "(b f) c h w -> b f c h w", b=batch_size, f=num_frames)
+
+        frame_step = INFER_LEN - OVERLAP
+        org_video_len = frames.shape[1]
+        append_frame_len = (frame_step - (org_video_len % frame_step)) % frame_step + (INFER_LEN - frame_step)
+        frames = torch.cat([frames, frames[:, -1:, :, :, :].expand(-1, append_frame_len, -1, -1, -1)], dim=1)
+
+        # Process frames in chunks
+        depth_list = []
+        depth_aligned = []
+        pre_input = None
+        for frame_id in range(0, org_video_len, frame_step):
+            cur_input = frames[:, frame_id : frame_id + INFER_LEN, ...].to(device)
+            if pre_input is not None:
+                cur_input[:, :OVERLAP, ...] = pre_input[:, KEYFRAMES, ...]
+
+            with torch.no_grad():
+                depth = self.forward(cur_input)  # depth shape: [B, T, H, W]
+                depth = F.interpolate(
+                    depth.flatten(0, 1).unsqueeze(1),
+                    size=(frame_height, frame_width),
+                    mode="bilinear",
+                    align_corners=True,
+                )
+                depth = depth.squeeze(1).reshape(batch_size, -1, frame_height, frame_width)
+                depth_list.append(depth)  # Store as torch tensor
+
+            pre_input = cur_input
+
+        del frames
+        gc.collect()
+
+        # Depth alignment using torch tensors
+        depth_aligned = []
+        ref_align = None
+        align_len = OVERLAP - INTERP_LEN
+        kf_align_list = KEYFRAMES[:align_len]
+
+        for chunk_idx, depth_chunk in enumerate(depth_list):
+            if chunk_idx == 0:
+                depth_aligned.append(depth_chunk)  # First chunk remains unchanged
+                ref_align = depth_chunk[:, kf_align_list, ...]
+            else:
+                curr_align = depth_chunk[:, : len(kf_align_list), ...]
+
+                # Compute scale and shift using torch tensors
+                mask = torch.ones_like(curr_align, device=device)
+                scale, shift = self.compute_scale_and_shift_torch(
+                    curr_align.reshape(batch_size, -1), ref_align.reshape(batch_size, -1), mask.reshape(batch_size, -1)
+                )
+
+                # Apply scale and shift
+                depth_chunk = depth_chunk * scale.view(-1, 1, 1, 1) + shift.view(-1, 1, 1, 1)
+                depth_chunk = torch.clamp(depth_chunk, min=0)
+
+                # Interpolate overlapping frames
+                pre_depth = depth_aligned[-1][:, -INTERP_LEN:, ...]
+                post_depth = depth_chunk[:, align_len:OVERLAP, ...]
+                interpolated = self.get_interpolate_frames_torch(
+                    [pre_depth[:, i] for i in range(INTERP_LEN)], [post_depth[:, i] for i in range(INTERP_LEN)]
+                )
+
+                # Update last INTERP_LEN frames of previous chunk
+                for i, interp in enumerate(interpolated):
+                    depth_aligned[-1][:, -INTERP_LEN + i] = interp
+
+                # Append non-overlapping frames
+                depth_aligned.append(depth_chunk[:, OVERLAP:, ...])
+
+                # Update reference alignment
+                ref_align = torch.cat([ref_align[:, :1], depth_chunk[:, kf_align_list[1:], ...]], dim=1)
+
+        # Concatenate all aligned depths
+        depth_all = torch.cat([chunk for chunk in depth_aligned], dim=1)
+        depth_all = depth_all[:, :org_video_len, ...]
+        return depth_all, target_fps
+    
