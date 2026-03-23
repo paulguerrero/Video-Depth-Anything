@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "video-depth-anything"
+version = "0.1.0"
+description = "Consistent depth estimation for super-long videos (CVPR 2025 Highlight)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Sili Chen" },
+    { name = "Hengkai Guo" },
+    { name = "Shengnan Zhu" },
+    { name = "Feihu Zhang" },
+    { name = "Zilong Huang" },
+    { name = "Jiashi Feng" },
+    { name = "Bingyi Kang" },
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy==1.24.0",
+    "torch==2.1.1",
+    "torchvision==0.16.1",
+    "opencv-python",
+    "matplotlib",
+    "Pillow",
+    "imageio==2.37.0",
+    "imageio-ffmpeg==0.4.7",
+    "decord",
+    "xformers==0.0.23",
+    "einops==0.4.1",
+    "easydict",
+    "tqdm",
+    "OpenEXR==3.3.1",
+]
+
+[project.optional-dependencies]
+demo = [
+    "gradio",
+]
+dev = [
+    "pytest",
+    "black",
+    "isort",
+]
+
+[project.scripts]
+video-depth-anything = "run:main"
+
+[project.urls]
+Homepage = "https://videodepthanything.github.io"
+Repository = "https://github.com/DepthAnything/Video-Depth-Anything"
+Paper = "https://arxiv.org/abs/2501.12375"
+
+[tool.setuptools.packages.find]
+include = ["video_depth_anything*", "utils*", "loss*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.json", "*.yaml", "*.yml"]
