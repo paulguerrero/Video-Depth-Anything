@@ -28,7 +28,6 @@ dependencies = [
     "imageio>=2.37.0",
     "imageio-ffmpeg>=0.4.7",
     "decord",
-    "xformers>=0.0.23",
     "einops>=0.4.1",
     "easydict",
     "tqdm",
