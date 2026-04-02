@@ -19,20 +19,20 @@ authors = [
 ]
 requires-python = ">=3.8"
 dependencies = [
-    "numpy==1.24.0",
-    "torch==2.1.1",
-    "torchvision==0.16.1",
+    "numpy>=1.24.0,<2.0",
+    "torch>=2.1.1",
+    "torchvision>=0.16.1",
     "opencv-python",
     "matplotlib",
     "Pillow",
-    "imageio==2.37.0",
-    "imageio-ffmpeg==0.4.7",
+    "imageio>=2.37.0",
+    "imageio-ffmpeg>=0.4.7",
     "decord",
-    "xformers==0.0.23",
-    "einops==0.4.1",
+    "xformers>=0.0.23",
+    "einops>=0.4.1",
     "easydict",
     "tqdm",
-    "OpenEXR==3.3.1",
+    "OpenEXR>=3.3.1",
     "einops"
 ]
 
